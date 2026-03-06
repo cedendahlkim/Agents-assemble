@@ -146,7 +146,7 @@ function App() {
             <div ref={resultsEndRef} />
           </div>
 
-          {/* Right sidebar */}
+          {/* Right sidebar — desktop */}
           <aside className="hidden lg:block space-y-4">
             <AgentStatusBar />
             <AgentActivityLog />
@@ -177,6 +177,12 @@ function App() {
               </div>
             </div>
           </aside>
+        </div>
+
+        {/* Mobile: Agent Activity + Status below main content */}
+        <div className="lg:hidden mt-6 space-y-4">
+          <AgentStatusBar />
+          <AgentActivityLog />
         </div>
       </main>
 
