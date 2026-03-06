@@ -1,0 +1,87 @@
+services:
+  triage:
+    build:
+      context: .
+      dockerfile: Dockerfile.node
+    container_name: gracestack-triage
+    restart: unless-stopped
+    command: ["node", "--loader", "tsx", "agents/triage/index.ts"]
+    env_file: .env
+    expose:
+      - "10020"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:10020/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  memory:
+    build:
+      context: .
+      dockerfile: Dockerfile.node
+    container_name: gracestack-memory
+    restart: unless-stopped
+    command: ["node", "--loader", "tsx", "agents/memory/index.ts"]
+    env_file: .env
+    expose:
+      - "10021"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:10021/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  fhir-agent:
+    build:
+      context: .
+      dockerfile: Dockerfile.node
+    container_name: gracestack-fhir
+    restart: unless-stopped
+    command: ["node", "--loader", "tsx", "agents/fhir/index.ts"]
+    env_file: .env
+    expose:
+      - "10028"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:10028/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  orchestration:
+    build:
+      context: .
+      dockerfile: Dockerfile.node
+    container_name: gracestack-orchestration
+    restart: unless-stopped
+    command: ["node", "--loader", "tsx", "orchestration/cascade.ts"]
+    env_file: .env
+    environment:
+      - TRIAGE_AGENT_URL=http://triage:10020
+      - MEMORY_AGENT_URL=http://memory:10021
+      - FHIR_AGENT_URL=http://fhir-agent:10028
+    expose:
+      - "10030"
+    depends_on:
+      triage:
+        condition: service_healthy
+      memory:
+        condition: service_healthy
+      fhir-agent:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:10030/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  ui:
+    build:
+      context: ./ui
+      dockerfile: Dockerfile
+    container_name: gracestack-ai-ui
+    restart: unless-stopped
+    ports:
+      - "10080:80"
+    depends_on:
+      orchestration:
+        condition: service_healthy
