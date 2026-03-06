@@ -8,7 +8,7 @@ import { ResponseCard } from "./components/ResponseCard";
 import { ThinkingIndicator } from "./components/ThinkingIndicator";
 import AgentActivityLog from "./components/AgentActivityLog";
 import { orchestrate, type OrchestrationResponse } from "./api";
-import { MessageSquare, Shield } from "lucide-react";
+import { MessageSquare, Shield, Trash2 } from "lucide-react";
 
 interface HistoryEntry {
   id: string;
@@ -56,7 +56,20 @@ function App() {
         <div className="grid grid-cols-1 lg:grid-cols-[1fr_280px] gap-6">
           {/* Main content area */}
           <div className="space-y-5 min-w-0">
-            <ChatInput onSend={handleSend} loading={loading} />
+            <div className="flex items-end gap-2">
+              <div className="flex-1">
+                <ChatInput onSend={handleSend} loading={loading} />
+              </div>
+              {history.length > 0 && (
+                <button
+                  onClick={() => setHistory([])}
+                  className="shrink-0 mb-px p-2.5 rounded-xl border border-slate-200 bg-white text-slate-400 hover:text-red-500 hover:border-red-200 hover:bg-red-50 transition-colors"
+                  title="Rensa chatthistorik"
+                >
+                  <Trash2 className="w-5 h-5" />
+                </button>
+              )}
+            </div>
 
             {error && (
               <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 animate-fade-in">
