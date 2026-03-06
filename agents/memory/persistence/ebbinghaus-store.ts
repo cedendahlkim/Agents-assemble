@@ -5,6 +5,7 @@ import Database from "better-sqlite3";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 import { randomUUID } from "crypto";
+import { mkdirSync } from "fs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -47,7 +48,6 @@ export class PersistentMemoryStore {
 
   constructor() {
     // Ensure data directory exists
-    const { mkdirSync } = require("fs");
     mkdirSync(dirname(DB_PATH), { recursive: true });
 
     this.db = new Database(DB_PATH);
