@@ -10,10 +10,11 @@ services:
     expose:
       - "10020"
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:10020/health"]
-      interval: 30s
+      test: ["CMD", "node", "-e", "fetch('http://localhost:10020/health').then(r=>{if(!r.ok)throw 1})"]
+      interval: 10s
       timeout: 5s
-      retries: 3
+      retries: 5
+      start_period: 15s
 
   memory:
     build:
@@ -26,10 +27,11 @@ services:
     expose:
       - "10021"
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:10021/health"]
-      interval: 30s
+      test: ["CMD", "node", "-e", "fetch('http://localhost:10021/health').then(r=>{if(!r.ok)throw 1})"]
+      interval: 10s
       timeout: 5s
-      retries: 3
+      retries: 5
+      start_period: 15s
 
   fhir-agent:
     build:
@@ -42,10 +44,11 @@ services:
     expose:
       - "10028"
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:10028/health"]
-      interval: 30s
+      test: ["CMD", "node", "-e", "fetch('http://localhost:10028/health').then(r=>{if(!r.ok)throw 1})"]
+      interval: 10s
       timeout: 5s
-      retries: 3
+      retries: 5
+      start_period: 15s
 
   orchestration:
     build:
@@ -69,10 +72,11 @@ services:
       fhir-agent:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:10030/health"]
-      interval: 30s
+      test: ["CMD", "node", "-e", "fetch('http://localhost:10030/health').then(r=>{if(!r.ok)throw 1})"]
+      interval: 10s
       timeout: 5s
-      retries: 3
+      retries: 5
+      start_period: 20s
 
   ui:
     build:
