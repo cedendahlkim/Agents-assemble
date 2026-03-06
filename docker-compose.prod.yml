@@ -5,7 +5,7 @@ services:
       dockerfile: Dockerfile.node
     container_name: gracestack-triage
     restart: unless-stopped
-    command: ["node", "--loader", "tsx", "agents/triage/index.ts"]
+    command: ["node", "--import", "tsx", "agents/triage/index.ts"]
     env_file: .env
     expose:
       - "10020"
@@ -22,7 +22,7 @@ services:
       dockerfile: Dockerfile.node
     container_name: gracestack-memory
     restart: unless-stopped
-    command: ["node", "--loader", "tsx", "agents/memory/index.ts"]
+    command: ["node", "--import", "tsx", "agents/memory/index.ts"]
     env_file: .env
     expose:
       - "10021"
@@ -39,7 +39,7 @@ services:
       dockerfile: Dockerfile.node
     container_name: gracestack-fhir
     restart: unless-stopped
-    command: ["node", "--loader", "tsx", "agents/fhir/index.ts"]
+    command: ["node", "--import", "tsx", "agents/fhir/index.ts"]
     env_file: .env
     expose:
       - "10028"
@@ -56,7 +56,7 @@ services:
       dockerfile: Dockerfile.node
     container_name: gracestack-orchestration
     restart: unless-stopped
-    command: ["node", "--loader", "tsx", "orchestration/cascade.ts"]
+    command: ["node", "--import", "tsx", "orchestration/cascade.ts"]
     env_file: .env
     environment:
       - TRIAGE_AGENT_URL=http://triage:10020
