@@ -6,6 +6,12 @@ import "dotenv/config";
 import express from "express";
 import { v4 as uuidv4 } from "uuid";
 import { GoogleGenerativeAI } from "@google/generative-ai";
+import { readFileSync } from "fs";
+import { join, dirname } from "path";
+import { fileURLToPath } from "url";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 import type {
   TriageResult,
   MemoryResult,
@@ -282,10 +288,12 @@ async function synthesizeResponse(
 
 async function orchestrate(req: OrchestrationRequest): Promise<OrchestrationResponse> {
   console.log(`\n📨 New request: "${req.userMessage}"`);
+  emitAgentEvent("User", "Orchestration", req.userMessage.slice(0, 80), "call");
 
   // Step 1: Analyze intent
   const intent = await analyzeIntent(req.userMessage);
   console.log("🎯 Intent:", JSON.stringify(intent, null, 2));
+  emitAgentEvent("Orchestration", "Intent Parser", `patient=${intent.patientId ?? "unknown"}, triage=${intent.needsTriage}, memory=${intent.needsMemory}`, "response");
 
   const agentsUsed: string[] = [];
   let triageResult: TriageResult | null = null;
@@ -297,27 +305,40 @@ async function orchestrate(req: OrchestrationRequest): Promise<OrchestrationResp
 
   if (intent.needsTriage && intent.symptoms) {
     agentsUsed.push("Triage Agent");
+    emitAgentEvent("Orchestration", "Triage Agent", `assess: ${intent.symptoms.slice(0, 60)}`, "call");
     promises.push(
       callTriageAgent(intent.symptoms, intent.patientId ?? undefined).then((r) => {
         triageResult = r;
+        if (r) emitAgentEvent("Triage Agent", "Orchestration", `priority: ${r.priority}`, "response");
       }),
     );
   }
 
   if (intent.needsMemory && intent.patientId) {
     agentsUsed.push("Memory Agent (Gracestack AI)");
+    emitAgentEvent("Orchestration", "Memory Agent", `check patient history: ${intent.patientId}`, "call");
     promises.push(
       callMemoryAgent(intent.patientId, "history", intent.symptoms ?? undefined).then((r) => {
         memoryResult = r;
+        if (r) {
+          emitAgentEvent("Memory Agent", "Orchestration", `${r.memories.length} memories, ${r.patterns.length} patterns found`, "response");
+          if (r.gutFeelingFlags.length > 0) {
+            for (const f of r.gutFeelingFlags) {
+              emitAgentEvent("Memory Agent", "Orchestration", `⚠️ Gut Feeling: ${f.description} (${(f.confidence * 100).toFixed(0)}%)`, "flag");
+            }
+          }
+        }
       }),
     );
   }
 
   if (intent.needsFhir && intent.patientId) {
     agentsUsed.push("FHIR Agent");
+    emitAgentEvent("Orchestration", "FHIR Agent", `fetch: patient ${intent.patientId} summary`, "call");
     promises.push(
       callFhirAgent(intent.patientId, "summary").then((r) => {
         fhirData = r;
+        if (r) emitAgentEvent("FHIR Agent", "Orchestration", `${r.conditions.length} conditions, ${r.medications.length} meds`, "response");
       }),
     );
   }
@@ -326,7 +347,9 @@ async function orchestrate(req: OrchestrationRequest): Promise<OrchestrationResp
   console.log(`✅ Agents completed: ${agentsUsed.join(", ")}`);
 
   // Step 3: Synthesize response
+  emitAgentEvent("Orchestration", "Gemini LLM", "synthesize clinical summary", "call");
   const response = await synthesizeResponse(intent, triageResult, memoryResult, fhirData);
+  emitAgentEvent("Orchestration", "User", "Clinical summary ready", "response");
 
   return {
     response,
@@ -383,6 +406,91 @@ app.get("/agents", async (_req, res) => {
 
   res.json(statuses);
 });
+
+// --- A2A Agent Cards (.well-known/agent.json) ---
+
+const CARDS_DIR = join(__dirname, "..", "agents", "agent-cards");
+
+function loadCard(name: string) {
+  return JSON.parse(readFileSync(join(CARDS_DIR, `${name}.json`), "utf-8"));
+}
+
+app.get("/.well-known/agent.json", (_req, res) => {
+  res.json(loadCard("orchestration"));
+});
+app.get("/agents/triage/.well-known/agent.json", (_req, res) => {
+  res.json(loadCard("triage"));
+});
+app.get("/agents/memory/.well-known/agent.json", (_req, res) => {
+  res.json(loadCard("memory"));
+});
+app.get("/agents/fhir/.well-known/agent.json", (_req, res) => {
+  res.json(loadCard("fhir"));
+});
+
+// --- Agent Event Bus (SSE for Activity Visualizer) ---
+
+interface AgentEvent {
+  timestamp: string;
+  from: string;
+  to: string;
+  message: string;
+  type: "call" | "response" | "flag";
+}
+
+const eventClients: Set<express.Response> = new Set();
+const recentEvents: AgentEvent[] = [];
+const MAX_RECENT_EVENTS = 100;
+
+function emitAgentEvent(from: string, to: string, message: string, type: AgentEvent["type"] = "call") {
+  const event: AgentEvent = {
+    timestamp: new Date().toISOString(),
+    from,
+    to,
+    message,
+    type,
+  };
+  recentEvents.push(event);
+  if (recentEvents.length > MAX_RECENT_EVENTS) recentEvents.shift();
+  for (const client of eventClients) {
+    client.write(`data: ${JSON.stringify(event)}\n\n`);
+  }
+}
+
+app.get("/api/agent-stream", (_req, res) => {
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache");
+  res.setHeader("Connection", "keep-alive");
+  res.setHeader("X-Accel-Buffering", "no");
+  // Send recent events on connect
+  for (const event of recentEvents.slice(-20)) {
+    res.write(`data: ${JSON.stringify(event)}\n\n`);
+  }
+  eventClients.add(res);
+  _req.on("close", () => eventClients.delete(res));
+});
+
+app.get("/api/agent-events", (_req, res) => {
+  res.json(recentEvents.slice(-50));
+});
+
+// --- Rate Limiting (simple in-memory) ---
+
+const rateLimits = new Map<string, { count: number; resetAt: number }>();
+const RATE_LIMIT_MAX = 60;
+const RATE_LIMIT_WINDOW_MS = 60_000;
+
+function checkRateLimit(key: string): boolean {
+  const now = Date.now();
+  const entry = rateLimits.get(key);
+  if (!entry || now > entry.resetAt) {
+    rateLimits.set(key, { count: 1, resetAt: now + RATE_LIMIT_WINDOW_MS });
+    return true;
+  }
+  if (entry.count >= RATE_LIMIT_MAX) return false;
+  entry.count++;
+  return true;
+}
 
 // --- OpenAI-Compatible API Wrapper ---
 
@@ -460,6 +568,15 @@ function extractUserMessage(messages: OpenAIChatMessage[]): string {
 // POST /v1/chat/completions — OpenAI-compatible Chat Completions
 app.post("/v1/chat/completions", async (req, res) => {
   try {
+    // Rate limiting
+    const clientIp = req.ip ?? req.socket.remoteAddress ?? "unknown";
+    if (!checkRateLimit(clientIp)) {
+      res.status(429).json({
+        error: { message: "Rate limit exceeded (60 req/min)", type: "rate_limit_error", code: "rate_limit_exceeded" },
+      });
+      return;
+    }
+
     const body = req.body as OpenAIChatRequest;
 
     if (!body.messages || !Array.isArray(body.messages) || body.messages.length === 0) {
@@ -478,7 +595,7 @@ app.post("/v1/chat/completions", async (req, res) => {
     }
 
     const modelId = body.model || GRACESTACK_MODEL_ID;
-    console.log(`\n� OpenAI-compat request [model=${modelId}, stream=${!!body.stream}]: "${userMessage.slice(0, 100)}..."`);
+    console.log(`\n🔌 OpenAI-compat request [model=${modelId}, stream=${!!body.stream}]: "${userMessage.slice(0, 100)}..."`);
 
     if (body.stream) {
       // --- Streaming (SSE) ---
@@ -493,21 +610,17 @@ app.post("/v1/chat/completions", async (req, res) => {
       const roleChunk = buildOpenAIChunk(completionId, modelId, { role: "assistant" }, null);
       res.write(`data: ${JSON.stringify(roleChunk)}\n\n`);
 
-      // Send "thinking" status while orchestrating
-      const thinkingChunk = buildOpenAIChunk(completionId, modelId, { content: "" }, null);
-      res.write(`data: ${JSON.stringify(thinkingChunk)}\n\n`);
-
       // Run orchestration
       const result = await orchestrate({ userMessage });
 
-      // Stream response in chunks (simulate token-by-token with word chunks)
+      // Stream response in chunks
       const words = result.response.split(/(\s+)/);
       for (const word of words) {
         const chunk = buildOpenAIChunk(completionId, modelId, { content: word }, null);
         res.write(`data: ${JSON.stringify(chunk)}\n\n`);
       }
 
-      // Append agent metadata as a final note
+      // Append agent metadata
       if (result.agentsUsed.length > 0) {
         const meta = `\n\n---\n*Agents used: ${result.agentsUsed.join(", ")}*`;
         const metaChunk = buildOpenAIChunk(completionId, modelId, { content: meta }, null);
@@ -531,7 +644,31 @@ app.post("/v1/chat/completions", async (req, res) => {
       const promptTokens = Math.ceil(userMessage.length / 4);
       const completionTokens = Math.ceil(content.length / 4);
 
-      res.json(buildOpenAIResponse(content, modelId, promptTokens, completionTokens));
+      const response = buildOpenAIResponse(content, modelId, promptTokens, completionTokens);
+
+      // Add gracestack_metadata (hackathon differentiator)
+      const enriched = {
+        ...response,
+        gracestack_metadata: {
+          triage_priority: result.triageResult?.priority ?? null,
+          gut_feeling_flags: result.memoryResult?.gutFeelingFlags ?? [],
+          memory_hits: result.memoryResult?.memories?.length ?? 0,
+          hdc_confidence: result.memoryResult?.gutFeelingFlags?.[0]?.confidence ?? null,
+          agents_used: result.agentsUsed,
+          fhir_written: !!result.fhirData,
+        },
+      };
+
+      // SHARP context headers (Prompt Opinion integration)
+      if (result.triageResult) {
+        res.setHeader("X-SHARP-Triage-Level", result.triageResult.priority);
+      }
+      if (result.memoryResult?.patientId) {
+        res.setHeader("X-SHARP-Patient-Context", result.memoryResult.patientId);
+      }
+      res.setHeader("X-SHARP-Memory-Context", response.id);
+
+      res.json(enriched);
     }
   } catch (err) {
     console.error("OpenAI-compat error:", err);

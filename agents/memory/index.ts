@@ -1,16 +1,16 @@
 // LAGER 2 — Agent B: Memory Agent — Gracestack AI (Port 10021)
 // Gracestack Architecture: Ebbinghaus + HDC + Gut Feeling
-// TypeScript version for rapid development (Rust version retained for Docker deploy)
+// Now with SQLite-backed persistent memory across sessions
 
 import "dotenv/config";
 import express from "express";
-import { MemoryStore, currentStrength, type Memory } from "./bride/ebbinghaus.js";
+import { PersistentMemoryStore, computeStrength } from "./persistence/ebbinghaus-store.js";
 import { HdcEncoder, type MemoryEntry } from "./bride/hdc.js";
 import { GutFeeling } from "./bride/gut-feeling.js";
 
 const PORT = parseInt(process.env.MEMORY_AGENT_PORT ?? "10021", 10);
 
-const store = new MemoryStore();
+const store = new PersistentMemoryStore();
 const hdc = new HdcEncoder();
 const gut = new GutFeeling();
 
@@ -63,13 +63,14 @@ app.post("/a2a/query", (req, res) => {
   const body = req.body as QueryRequest;
   const { patient_id, query_type, context = "" } = body;
 
-  // Get memories with Ebbinghaus decay
+  // Get memories with Ebbinghaus decay (now persistent via SQLite)
   const rawMemories = store.getMemories(patient_id);
-  const memories: MemoryEntry[] = rawMemories.map((m: Memory) => ({
+  const encounterCount = store.getEncounterCount(patient_id);
+  const memories: MemoryEntry[] = rawMemories.map((m) => ({
     content: m.content,
-    strength: currentStrength(m),
-    lastAccessed: new Date(m.lastAccessed).toISOString(),
-    category: m.category,
+    strength: computeStrength(m.last_accessed, m.stability),
+    lastAccessed: new Date(m.last_accessed).toISOString(),
+    category: m.category as MemoryEntry["category"],
   }));
 
   // HDC pattern detection
@@ -95,6 +96,8 @@ app.post("/a2a/query", (req, res) => {
     memories,
     patterns,
     gut_feeling_flags,
+    encounter_count: encounterCount,
+    persistence: "sqlite",
   });
 });
 
@@ -103,22 +106,40 @@ interface IngestRequest {
   patient_id: string;
   content: string;
   category: "condition" | "medication" | "observation" | "procedure";
+  triage_level?: string;
+  fhir_observation_id?: string;
 }
 
 app.post("/a2a/ingest", (req, res) => {
   const body = req.body as IngestRequest;
-  const memoryId = store.addMemory(body.patient_id, body.content, body.category);
+  const memoryId = store.addMemory(body.patient_id, body.content, body.category, {
+    triageLevel: body.triage_level,
+    fhirObservationId: body.fhir_observation_id,
+  });
   hdc.encodeMemory(body.content, body.category);
 
-  res.json({ status: "stored", memory_id: memoryId });
+  res.json({ status: "stored", memory_id: memoryId, persistence: "sqlite" });
+});
+
+// --- Encounter logging ---
+app.post("/a2a/encounter", (req, res) => {
+  const { patient_id, query, triage_level, agents_used, summary } = req.body;
+  const encounterId = store.logEncounter(patient_id, query, { triageLevel: triage_level, agentsUsed: agents_used, summary });
+  res.json({ status: "logged", encounter_id: encounterId });
+});
+
+app.get("/a2a/encounters/:patientId", (req, res) => {
+  const encounters = store.getEncounters(req.params.patientId);
+  res.json({ patient_id: req.params.patientId, encounters, count: encounters.length });
 });
 
 // --- Health check ---
 app.get("/health", (_req, res) => {
-  res.json({ status: "ok", agent: "memory-gracestack", port: PORT });
+  res.json({ status: "ok", agent: "memory-gracestack", port: PORT, persistence: "sqlite" });
 });
 
 app.listen(PORT, () => {
   console.log(`🧠 Memory Agent (Gracestack AI) running on http://localhost:${PORT}`);
   console.log(`   Gracestack modules: Ebbinghaus | HDC (${10_000}d) | Gut Feeling`);
+  console.log(`   💾 Persistent memory: SQLite`);
 });

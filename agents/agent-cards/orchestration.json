@@ -1,0 +1,37 @@
+{
+  "name": "Gracestack AI Orchestration",
+  "description": "Healthcare multi-agent orchestration system. Routes clinical queries to specialized agents (Triage, Memory, FHIR) and synthesizes actionable clinical summaries using Gemini LLM.",
+  "version": "1.0.0",
+  "url": "https://ai.gracestack.se",
+  "provider": {
+    "organization": "Gracestack",
+    "url": "https://www.gracestack.se"
+  },
+  "capabilities": {
+    "streaming": true,
+    "pushNotifications": false,
+    "stateTransitionHistory": true
+  },
+  "skills": [
+    {
+      "id": "orchestrate",
+      "name": "Clinical Orchestration",
+      "description": "Analyze clinical queries, delegate to specialized agents, and synthesize comprehensive clinical summaries",
+      "inputModes": ["text"],
+      "outputModes": ["text", "data"]
+    },
+    {
+      "id": "openai_compat",
+      "name": "OpenAI-Compatible Chat",
+      "description": "Drop-in replacement for OpenAI Chat Completions API with healthcare-specific metadata",
+      "inputModes": ["text"],
+      "outputModes": ["text", "data"]
+    }
+  ],
+  "defaultInputModes": ["text"],
+  "defaultOutputModes": ["text"],
+  "authentication": {
+    "schemes": ["Bearer"]
+  },
+  "supportsAuthenticatedExtendedCard": false
+}

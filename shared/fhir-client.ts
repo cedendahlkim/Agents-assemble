@@ -15,6 +15,15 @@ export interface FhirBundle {
   entry?: Array<{ resource: FhirResource }>;
 }
 
+export interface DrugInteractionResult {
+  drugA: string;
+  drugB: string;
+  severity: "low" | "moderate" | "high";
+  adverseEventCount: number;
+  topReactions: string[];
+  source: string;
+}
+
 export class FhirClient {
   private baseUrl: string;
 
@@ -48,6 +57,68 @@ export class FhirClient {
 
   async searchConditions(params: Record<string, string>): Promise<FhirBundle> {
     return this.search("Condition", params);
+  }
+
+  // --- Extended FHIR R4 Resources (Komponent 5) ---
+
+  async getAllergies(patientId: string): Promise<FhirBundle> {
+    return this.search("AllergyIntolerance", { patient: patientId });
+  }
+
+  async getEncounters(patientId: string): Promise<FhirBundle> {
+    return this.search("Encounter", { patient: patientId, _sort: "-date", _count: "10" });
+  }
+
+  async writeCondition(condition: FhirResource): Promise<FhirResource> {
+    return this.create("Condition", condition);
+  }
+
+  async writeEncounter(encounter: FhirResource): Promise<FhirResource> {
+    return this.create("Encounter", encounter);
+  }
+
+  async writePatient(patient: FhirResource): Promise<FhirResource> {
+    return this.create("Patient", patient);
+  }
+
+  // --- Drug Interaction Check (FDA Adverse Event API) ---
+
+  async checkDrugInteractions(medications: string[]): Promise<DrugInteractionResult[]> {
+    const results: DrugInteractionResult[] = [];
+    const FDA_BASE = "https://api.fda.gov/drug/event.json";
+
+    // Check pairs of medications for co-occurrence in adverse events
+    for (let i = 0; i < medications.length; i++) {
+      for (let j = i + 1; j < medications.length; j++) {
+        const drugA = medications[i].split(" ")[0]; // First word = drug name
+        const drugB = medications[j].split(" ")[0];
+        try {
+          const query = `search=patient.drug.openfda.generic_name:"${drugA}"+AND+patient.drug.openfda.generic_name:"${drugB}"&count=patient.reaction.reactionmeddrapt.exact&limit=5`;
+          const response = await fetch(`${FDA_BASE}?${query}`, {
+            headers: { Accept: "application/json" },
+            signal: AbortSignal.timeout(5000),
+          });
+          if (response.ok) {
+            const data = await response.json() as { results?: Array<{ term: string; count: number }> };
+            if (data.results && data.results.length > 0) {
+              const totalEvents = data.results.reduce((sum, r) => sum + r.count, 0);
+              const topReactions = data.results.slice(0, 3).map((r) => r.term);
+              results.push({
+                drugA,
+                drugB,
+                severity: totalEvents > 100 ? "high" : totalEvents > 20 ? "moderate" : "low",
+                adverseEventCount: totalEvents,
+                topReactions,
+                source: "FDA FAERS",
+              });
+            }
+          }
+        } catch {
+          // FDA API timeout or error — skip silently
+        }
+      }
+    }
+    return results;
   }
 
   private async read(resourceType: string, id: string): Promise<FhirResource> {

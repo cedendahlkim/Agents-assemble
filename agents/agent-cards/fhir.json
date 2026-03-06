@@ -1,0 +1,50 @@
+{
+  "name": "Gracestack FHIR Agent",
+  "description": "HL7 FHIR R4 integration agent for reading and writing patient journal data including Patient, Observation, Condition, MedicationRequest, AllergyIntolerance, and Encounter resources.",
+  "version": "1.0.0",
+  "url": "https://ai.gracestack.se/agents/fhir",
+  "provider": {
+    "organization": "Gracestack",
+    "url": "https://www.gracestack.se"
+  },
+  "capabilities": {
+    "streaming": false,
+    "pushNotifications": false,
+    "stateTransitionHistory": true
+  },
+  "skills": [
+    {
+      "id": "patient_summary",
+      "name": "Patient Summary",
+      "description": "Fetch comprehensive FHIR patient summary including conditions, medications, allergies, and recent observations",
+      "inputModes": ["text"],
+      "outputModes": ["data"]
+    },
+    {
+      "id": "write_observation",
+      "name": "Write Observation",
+      "description": "Create FHIR Observation resource for triage results and clinical findings",
+      "inputModes": ["data"],
+      "outputModes": ["data"]
+    },
+    {
+      "id": "write_encounter",
+      "name": "Write Encounter",
+      "description": "Log AI consultation as FHIR Encounter resource",
+      "inputModes": ["data"],
+      "outputModes": ["data"]
+    },
+    {
+      "id": "drug_interaction_check",
+      "name": "Drug Interaction Check",
+      "description": "Check for drug interactions using MedicationRequest data and FDA adverse event API",
+      "inputModes": ["text", "data"],
+      "outputModes": ["data"]
+    }
+  ],
+  "defaultInputModes": ["text"],
+  "defaultOutputModes": ["data"],
+  "authentication": {
+    "schemes": ["Bearer"]
+  }
+}

@@ -1,0 +1,43 @@
+{
+  "name": "Gracestack AI Memory Agent",
+  "description": "Cognitive memory system using Ebbinghaus forgetting curves, Hyperdimensional Computing (HDC) for pattern matching, and Gut Feeling anomaly detection for clinical decision support.",
+  "version": "1.0.0",
+  "url": "https://ai.gracestack.se/agents/memory",
+  "provider": {
+    "organization": "Gracestack",
+    "url": "https://www.gracestack.se"
+  },
+  "capabilities": {
+    "streaming": false,
+    "pushNotifications": false,
+    "stateTransitionHistory": true
+  },
+  "skills": [
+    {
+      "id": "patient_memory_recall",
+      "name": "Patient Memory Recall",
+      "description": "Retrieve patient history with Ebbinghaus decay-weighted relevance scoring",
+      "inputModes": ["text"],
+      "outputModes": ["text", "data"]
+    },
+    {
+      "id": "pattern_detection",
+      "name": "HDC Pattern Detection",
+      "description": "Detect clinical patterns using Hyperdimensional Computing vector similarity",
+      "inputModes": ["text", "data"],
+      "outputModes": ["data"]
+    },
+    {
+      "id": "gut_feeling",
+      "name": "Gut Feeling Anomaly Detection",
+      "description": "Flag potential clinical anomalies including drug interactions, symptom escalation, and unusual patterns",
+      "inputModes": ["text", "data"],
+      "outputModes": ["data"]
+    }
+  ],
+  "defaultInputModes": ["text"],
+  "defaultOutputModes": ["text", "data"],
+  "authentication": {
+    "schemes": ["Bearer"]
+  }
+}

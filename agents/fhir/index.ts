@@ -23,7 +23,7 @@ import {
   UserBuilder,
 } from "@a2a-js/sdk/server/express";
 import { FhirClient } from "../../shared/fhir-client.js";
-import type { FhirResource, FhirBundle } from "../../shared/fhir-client.js";
+import type { FhirResource, FhirBundle, DrugInteractionResult } from "../../shared/fhir-client.js";
 import type { FhirPatientSummary } from "../../shared/types.js";
 
 const PORT = parseInt(process.env.FHIR_AGENT_PORT ?? "10028", 10);
@@ -204,8 +204,132 @@ const app = express();
 app.use(`/${AGENT_CARD_PATH}`, agentCardHandler({ agentCardProvider: requestHandler }));
 app.use("/a2a/jsonrpc", jsonRpcHandler({ requestHandler, userBuilder: UserBuilder.noAuthentication }));
 
-app.get("/health", (_req, res) => res.json({ status: "ok", agent: "fhir", port: PORT }));
+app.use(express.json());
+
+// --- Extended FHIR R4 REST Endpoints (Komponent 5) ---
+
+// GET /fhir/patient/:id — Full patient summary
+app.get("/fhir/patient/:id", async (req, res) => {
+  try {
+    const summary = await buildPatientSummary(req.params.id);
+    res.json(summary);
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// GET /fhir/allergies/:patientId — AllergyIntolerance
+app.get("/fhir/allergies/:patientId", async (req, res) => {
+  try {
+    const bundle = await fhir.getAllergies(req.params.patientId);
+    const allergies = bundle.entry?.map((e) => {
+      const code = e.resource.code as { text?: string; coding?: Array<{ display?: string }> } | undefined;
+      return {
+        id: e.resource.id,
+        substance: code?.text ?? code?.coding?.[0]?.display ?? "Unknown",
+        criticality: e.resource.criticality ?? "unknown",
+      };
+    }) ?? [];
+    res.json({ patient_id: req.params.patientId, allergies });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// GET /fhir/encounters/:patientId — Encounter history
+app.get("/fhir/encounters/:patientId", async (req, res) => {
+  try {
+    const bundle = await fhir.getEncounters(req.params.patientId);
+    const encounters = bundle.entry?.map((e) => ({
+      id: e.resource.id,
+      status: e.resource.status,
+      class: (e.resource.class as { code?: string })?.code ?? "unknown",
+      period: e.resource.period,
+    })) ?? [];
+    res.json({ patient_id: req.params.patientId, encounters });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// POST /fhir/encounter — Log AI consultation as FHIR Encounter
+app.post("/fhir/encounter", async (req, res) => {
+  try {
+    const { patientId, summary, triageLevel } = req.body;
+    const encounter = {
+      resourceType: "Encounter",
+      status: "finished",
+      class: { system: "http://terminology.hl7.org/CodeSystem/v3-ActCode", code: "VR", display: "virtual" },
+      subject: { reference: `Patient/${patientId}` },
+      period: { start: new Date().toISOString(), end: new Date().toISOString() },
+      reasonCode: [{ text: `AI Triage: ${triageLevel ?? "N/A"} — ${summary?.slice(0, 200) ?? "consultation"}` }],
+      serviceProvider: { display: "Gracestack AI" },
+    };
+    const result = await fhir.writeEncounter(encounter as FhirResource);
+    res.json({ status: "created", encounter_id: result.id, resourceType: "Encounter" });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// POST /fhir/condition — Write new condition/diagnosis
+app.post("/fhir/condition", async (req, res) => {
+  try {
+    const { patientId, code, display, text } = req.body;
+    const condition = {
+      resourceType: "Condition",
+      clinicalStatus: { coding: [{ system: "http://terminology.hl7.org/CodeSystem/condition-clinical", code: "active" }] },
+      code: {
+        coding: code ? [{ system: "http://snomed.info/sct", code, display }] : [],
+        text: text ?? display ?? "Unknown condition",
+      },
+      subject: { reference: `Patient/${patientId}` },
+      recordedDate: new Date().toISOString(),
+    };
+    const result = await fhir.writeCondition(condition as FhirResource);
+    res.json({ status: "created", condition_id: result.id, resourceType: "Condition" });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// POST /fhir/drug-interactions — Check drug interactions via FDA API
+app.post("/fhir/drug-interactions", async (req, res) => {
+  try {
+    const { medications, patientId } = req.body;
+    let meds: string[] = medications ?? [];
+
+    // If patientId provided but no medications, fetch from FHIR
+    if (meds.length === 0 && patientId) {
+      const medBundle = await fhir.getMedications(patientId);
+      meds = medBundle.entry?.map((e) => {
+        const med = e.resource.medicationCodeableConcept as { text?: string; coding?: Array<{ display?: string }> } | undefined;
+        return med?.text ?? med?.coding?.[0]?.display ?? "";
+      }).filter(Boolean) ?? [];
+    }
+
+    if (meds.length < 2) {
+      res.json({ interactions: [], message: "At least 2 medications required for interaction check" });
+      return;
+    }
+
+    const interactions = await fhir.checkDrugInteractions(meds);
+    res.json({
+      patient_id: patientId ?? null,
+      medications: meds,
+      interactions,
+      has_interactions: interactions.length > 0,
+      high_severity_count: interactions.filter((i) => i.severity === "high").length,
+    });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+app.get("/health", (_req, res) => res.json({ status: "ok", agent: "fhir", port: PORT, fhir_version: "R4" }));
 
 app.listen(PORT, () => {
   console.log(`📋 FHIR Agent running on http://localhost:${PORT}`);
+  console.log(`   Extended: Patient, Observation, Condition, MedicationRequest, AllergyIntolerance, Encounter`);
+  console.log(`   Drug Interaction Check: FDA FAERS API`);
 });

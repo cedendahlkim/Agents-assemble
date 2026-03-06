@@ -17,3 +17,9 @@ Thumbs.db
 
 # Logs
 *.log
+
+# SQLite data
+agents/memory/data/
+*.db
+*.db-wal
+*.db-shm

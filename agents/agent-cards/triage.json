@@ -1,0 +1,29 @@
+{
+  "name": "Gracestack Triage Agent",
+  "description": "Clinical triage assessment with priority scoring. Uses Gemini LLM to evaluate symptoms and assign urgency levels (Low, Medium, High, Critical) following emergency department protocols.",
+  "version": "1.0.0",
+  "url": "https://ai.gracestack.se/agents/triage",
+  "provider": {
+    "organization": "Gracestack",
+    "url": "https://www.gracestack.se"
+  },
+  "capabilities": {
+    "streaming": false,
+    "pushNotifications": false,
+    "stateTransitionHistory": true
+  },
+  "skills": [
+    {
+      "id": "triage_assessment",
+      "name": "Triage Assessment",
+      "description": "Assess patient symptoms and return priority level (Low/Medium/High/Critical) with clinical reasoning",
+      "inputModes": ["text"],
+      "outputModes": ["text", "data"]
+    }
+  ],
+  "defaultInputModes": ["text"],
+  "defaultOutputModes": ["text", "data"],
+  "authentication": {
+    "schemes": ["Bearer"]
+  }
+}

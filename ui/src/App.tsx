@@ -6,6 +6,7 @@ import { TriageCard } from "./components/TriageCard";
 import { MemoryPanel } from "./components/MemoryPanel";
 import { ResponseCard } from "./components/ResponseCard";
 import { ThinkingIndicator } from "./components/ThinkingIndicator";
+import AgentActivityLog from "./components/AgentActivityLog";
 import { orchestrate, type OrchestrationResponse } from "./api";
 import { MessageSquare, Shield } from "lucide-react";
 
@@ -148,6 +149,7 @@ function App() {
           {/* Right sidebar */}
           <aside className="hidden lg:block space-y-4">
             <AgentStatusBar />
+            <AgentActivityLog />
 
             <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm">
               <h3 className="text-sm font-semibold text-slate-700 mb-2">About</h3>

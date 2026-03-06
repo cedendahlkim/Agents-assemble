@@ -26,6 +26,8 @@ services:
     env_file: .env
     expose:
       - "10021"
+    volumes:
+      - memory-data:/app/agents/memory/data
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://localhost:10021/health').then(r=>{if(!r.ok)throw 1})"]
       interval: 10s
@@ -89,3 +91,6 @@ services:
     depends_on:
       orchestration:
         condition: service_healthy
+
+volumes:
+  memory-data:
