@@ -457,7 +457,7 @@ function emitAgentEvent(from: string, to: string, message: string, type: AgentEv
   }
 }
 
-app.get("/api/agent-stream", (_req, res) => {
+app.get("/agent-stream", (_req, res) => {
   res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-cache");
   res.setHeader("Connection", "keep-alive");
@@ -470,7 +470,7 @@ app.get("/api/agent-stream", (_req, res) => {
   _req.on("close", () => eventClients.delete(res));
 });
 
-app.get("/api/agent-events", (_req, res) => {
+app.get("/agent-events", (_req, res) => {
   res.json(recentEvents.slice(-50));
 });
 
