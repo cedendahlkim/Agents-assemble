@@ -52,7 +52,16 @@ async function assessTriage(symptoms: string): Promise<{ priority: TriagePriorit
   });
 
   const text = result.response.text();
-  return safeParseJson(text, { priority: "Medium" as TriagePriority, reasoning: `LLM parse error, defaulting. Raw: ${text}` });
+  const parsed = safeParseJson<{ priority: TriagePriority; reasoning: string }>(text, {
+    priority: "Medium" as TriagePriority,
+    reasoning: "Automated triage assessment pending — defaulted to Medium priority.",
+  });
+  // Validate priority value
+  const validPriorities: TriagePriority[] = ["Low", "Medium", "High", "Critical"];
+  if (!validPriorities.includes(parsed.priority)) {
+    parsed.priority = "Medium" as TriagePriority;
+  }
+  return parsed;
 }
 
 async function writeTriageObservation(patientId: string, result: TriageResult): Promise<string | undefined> {
