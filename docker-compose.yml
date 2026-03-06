@@ -1,0 +1,79 @@
+version: "3.9"
+
+services:
+  # --- LAGER 2: Triage Agent (TypeScript/A2A) ---
+  triage-agent:
+    build:
+      context: .
+      dockerfile: Dockerfile.node
+    command: ["npm", "run", "start:triage"]
+    ports:
+      - "10020:10020"
+    environment:
+      - TRIAGE_AGENT_PORT=10020
+      - FHIR_BASE_URL=https://hapi.fhir.org/baseR4
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:10020/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # --- LAGER 2: Memory Agent — Gracestack AI ---
+  memory-agent:
+    build:
+      context: ./agents/memory
+      dockerfile: Dockerfile
+    ports:
+      - "10021:10021"
+    environment:
+      - RUST_LOG=info
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:10021/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # --- LAGER 2: FHIR Agent (TypeScript/A2A) ---
+  fhir-agent:
+    build:
+      context: .
+      dockerfile: Dockerfile.node
+    command: ["npm", "run", "start:fhir-agent"]
+    ports:
+      - "10028:10028"
+    environment:
+      - FHIR_AGENT_PORT=10028
+      - FHIR_BASE_URL=https://hapi.fhir.org/baseR4
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:10028/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # --- LAGER 3: Orchestration Agent ---
+  orchestration:
+    build:
+      context: .
+      dockerfile: Dockerfile.node
+    command: ["npm", "run", "start:orchestration"]
+    ports:
+      - "10030:10030"
+    environment:
+      - ORCHESTRATION_PORT=10030
+      - TRIAGE_AGENT_URL=http://triage-agent:10020
+      - MEMORY_AGENT_URL=http://memory-agent:10021
+      - FHIR_AGENT_URL=http://fhir-agent:10028
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+    depends_on:
+      triage-agent:
+        condition: service_healthy
+      memory-agent:
+        condition: service_healthy
+      fhir-agent:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:10030/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3

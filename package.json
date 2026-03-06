@@ -1,0 +1,36 @@
+{
+  "name": "agents-assemble",
+  "version": "1.0.0",
+  "description": "Multi-agent healthcare system — Agents Assemble Hackathon",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "start:fhir-mcp": "tsx mcp/healthcare-server.ts",
+    "start:triage": "tsx agents/triage/index.ts",
+    "start:fhir-agent": "tsx agents/fhir/index.ts",
+    "start:memory": "tsx agents/memory/index.ts",
+    "start:orchestration": "tsx orchestration/cascade.ts",
+    "start:all": "concurrently \"npm run start:triage\" \"npm run start:memory\" \"npm run start:fhir-agent\" \"npm run start:orchestration\"",
+    "dev": "npm run start:all"
+  },
+  "dependencies": {
+    "@a2a-js/sdk": "^0.3.0",
+    "@google/generative-ai": "^0.21.0",
+    "@modelcontextprotocol/sdk": "^1.12.1",
+    "cors": "^2.8.6",
+    "dotenv": "^17.3.1",
+    "express": "^4.21.0",
+    "uuid": "^11.1.0",
+    "zod": "^3.24.0"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.0",
+    "@types/node": "^22.10.0",
+    "@types/uuid": "^10.0.0",
+    "concurrently": "^9.1.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0"
+  }
+}
