@@ -384,9 +384,224 @@ app.get("/agents", async (_req, res) => {
   res.json(statuses);
 });
 
+// --- OpenAI-Compatible API Wrapper ---
+
+const GRACESTACK_MODEL_ID = "gracestack-ai";
+const GRACESTACK_MODEL_CREATED = Math.floor(Date.now() / 1000);
+
+interface OpenAIChatMessage {
+  role: "system" | "user" | "assistant";
+  content: string;
+}
+
+interface OpenAIChatRequest {
+  model?: string;
+  messages: OpenAIChatMessage[];
+  stream?: boolean;
+  max_tokens?: number;
+  temperature?: number;
+  user?: string;
+}
+
+function buildOpenAIResponse(
+  content: string,
+  model: string,
+  promptTokens: number,
+  completionTokens: number,
+) {
+  return {
+    id: `chatcmpl-${uuidv4()}`,
+    object: "chat.completion",
+    created: Math.floor(Date.now() / 1000),
+    model,
+    choices: [
+      {
+        index: 0,
+        message: { role: "assistant", content },
+        finish_reason: "stop",
+      },
+    ],
+    usage: {
+      prompt_tokens: promptTokens,
+      completion_tokens: completionTokens,
+      total_tokens: promptTokens + completionTokens,
+    },
+  };
+}
+
+function buildOpenAIChunk(
+  id: string,
+  model: string,
+  delta: { role?: string; content?: string },
+  finishReason: string | null,
+) {
+  return {
+    id,
+    object: "chat.completion.chunk",
+    created: Math.floor(Date.now() / 1000),
+    model,
+    choices: [{ index: 0, delta, finish_reason: finishReason }],
+  };
+}
+
+function extractUserMessage(messages: OpenAIChatMessage[]): string {
+  // Concatenate system context + last user message for orchestration
+  const systemParts = messages
+    .filter((m) => m.role === "system")
+    .map((m) => m.content);
+  const lastUser = [...messages].reverse().find((m) => m.role === "user");
+  if (!lastUser) return "";
+
+  // Include system context as prefix if present
+  const prefix = systemParts.length > 0 ? `[Context: ${systemParts.join(" ")}]\n` : "";
+  return prefix + lastUser.content;
+}
+
+// POST /v1/chat/completions — OpenAI-compatible Chat Completions
+app.post("/v1/chat/completions", async (req, res) => {
+  try {
+    const body = req.body as OpenAIChatRequest;
+
+    if (!body.messages || !Array.isArray(body.messages) || body.messages.length === 0) {
+      res.status(400).json({
+        error: { message: "messages is required and must be a non-empty array", type: "invalid_request_error", code: "invalid_messages" },
+      });
+      return;
+    }
+
+    const userMessage = extractUserMessage(body.messages);
+    if (!userMessage) {
+      res.status(400).json({
+        error: { message: "No user message found in messages array", type: "invalid_request_error", code: "missing_user_message" },
+      });
+      return;
+    }
+
+    const modelId = body.model || GRACESTACK_MODEL_ID;
+    console.log(`\n� OpenAI-compat request [model=${modelId}, stream=${!!body.stream}]: "${userMessage.slice(0, 100)}..."`);
+
+    if (body.stream) {
+      // --- Streaming (SSE) ---
+      res.setHeader("Content-Type", "text/event-stream");
+      res.setHeader("Cache-Control", "no-cache");
+      res.setHeader("Connection", "keep-alive");
+      res.setHeader("X-Accel-Buffering", "no");
+
+      const completionId = `chatcmpl-${uuidv4()}`;
+
+      // Send role chunk
+      const roleChunk = buildOpenAIChunk(completionId, modelId, { role: "assistant" }, null);
+      res.write(`data: ${JSON.stringify(roleChunk)}\n\n`);
+
+      // Send "thinking" status while orchestrating
+      const thinkingChunk = buildOpenAIChunk(completionId, modelId, { content: "" }, null);
+      res.write(`data: ${JSON.stringify(thinkingChunk)}\n\n`);
+
+      // Run orchestration
+      const result = await orchestrate({ userMessage });
+
+      // Stream response in chunks (simulate token-by-token with word chunks)
+      const words = result.response.split(/(\s+)/);
+      for (const word of words) {
+        const chunk = buildOpenAIChunk(completionId, modelId, { content: word }, null);
+        res.write(`data: ${JSON.stringify(chunk)}\n\n`);
+      }
+
+      // Append agent metadata as a final note
+      if (result.agentsUsed.length > 0) {
+        const meta = `\n\n---\n*Agents used: ${result.agentsUsed.join(", ")}*`;
+        const metaChunk = buildOpenAIChunk(completionId, modelId, { content: meta }, null);
+        res.write(`data: ${JSON.stringify(metaChunk)}\n\n`);
+      }
+
+      // Send stop chunk
+      const stopChunk = buildOpenAIChunk(completionId, modelId, {}, "stop");
+      res.write(`data: ${JSON.stringify(stopChunk)}\n\n`);
+      res.write("data: [DONE]\n\n");
+      res.end();
+    } else {
+      // --- Non-streaming ---
+      const result = await orchestrate({ userMessage });
+
+      let content = result.response;
+      if (result.agentsUsed.length > 0) {
+        content += `\n\n---\n*Agents used: ${result.agentsUsed.join(", ")}*`;
+      }
+
+      const promptTokens = Math.ceil(userMessage.length / 4);
+      const completionTokens = Math.ceil(content.length / 4);
+
+      res.json(buildOpenAIResponse(content, modelId, promptTokens, completionTokens));
+    }
+  } catch (err) {
+    console.error("OpenAI-compat error:", err);
+    res.status(500).json({
+      error: { message: (err as Error).message, type: "server_error", code: "internal_error" },
+    });
+  }
+});
+
+// GET /v1/models — List available models
+app.get("/v1/models", (_req, res) => {
+  res.json({
+    object: "list",
+    data: [
+      {
+        id: GRACESTACK_MODEL_ID,
+        object: "model",
+        created: GRACESTACK_MODEL_CREATED,
+        owned_by: "gracestack",
+        permission: [],
+        root: GRACESTACK_MODEL_ID,
+        parent: null,
+      },
+      {
+        id: "gracestack-ai-triage",
+        object: "model",
+        created: GRACESTACK_MODEL_CREATED,
+        owned_by: "gracestack",
+        permission: [],
+        root: "gracestack-ai-triage",
+        parent: GRACESTACK_MODEL_ID,
+      },
+      {
+        id: "gracestack-ai-memory",
+        object: "model",
+        created: GRACESTACK_MODEL_CREATED,
+        owned_by: "gracestack",
+        permission: [],
+        root: "gracestack-ai-memory",
+        parent: GRACESTACK_MODEL_ID,
+      },
+    ],
+  });
+});
+
+// GET /v1/models/:model — Get specific model
+app.get("/v1/models/:model", (req, res) => {
+  const models: Record<string, object> = {
+    [GRACESTACK_MODEL_ID]: {
+      id: GRACESTACK_MODEL_ID,
+      object: "model",
+      created: GRACESTACK_MODEL_CREATED,
+      owned_by: "gracestack",
+    },
+  };
+  const m = models[req.params.model];
+  if (m) {
+    res.json(m);
+  } else {
+    res.status(404).json({
+      error: { message: `Model '${req.params.model}' not found`, type: "invalid_request_error", code: "model_not_found" },
+    });
+  }
+});
+
 app.listen(PORT, () => {
   console.log(`🚀 Orchestration Agent running on http://localhost:${PORT}`);
-  console.log(`   POST /orchestrate — Send natural language queries`);
-  console.log(`   GET  /agents      — Discover available agents`);
-  console.log(`   GET  /health      — Health check`);
+  console.log(`   POST /orchestrate          — Native orchestration API`);
+  console.log(`   POST /v1/chat/completions  — OpenAI-compatible Chat API`);
+  console.log(`   GET  /v1/models            — List models`);
+  console.log(`   GET  /agents               — Discover available agents`);
+  console.log(`   GET  /health               — Health check`);
 });
